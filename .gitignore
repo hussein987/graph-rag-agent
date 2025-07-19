@@ -1,0 +1,12 @@
+/.env
+/.env.example
+*.pyc
+__pycache__/
+*.parquet
+*.txn
+*.manifest
+*.lance
+cache/
+*.env
+.langgraph_api/
+graphrag/input/

@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Knowledge Graph Visualization</title>
+    <style>
+        body { margin: 0; }
+        .node-label {
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            user-select: none;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+    </style>
+    <script src="//cdn.jsdelivr.net/npm/3d-force-graph"></script>
+</head>
+<body>
+
+<div id="controls" style="position: absolute; top: 10px; left: 10px; z-index: 1000; background: rgba(0,0,0,0.9); padding: 15px; border-radius: 8px; color: white; font-family: Arial, sans-serif; width: 320px; max-height: 90vh; overflow-y: auto;">
+    <h3 style="margin: 0 0 10px 0; color: #FFD700;">Graph Controls</h3>
+    
+    <!-- Color Mode Controls -->
+    <div style="margin-bottom: 15px;">
+        <button id="toggleSemantics" style="padding: 8px 12px; margin-right: 5px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">Semantic Colors</button>
+        <button id="toggleCommunity" style="padding: 8px 12px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">Community Colors</button>
+    </div>
+    
+    <!-- Search Controls -->
+    <div style="margin-bottom: 15px; border-top: 1px solid #555; padding-top: 10px;">
+        <h4 style="margin: 0 0 8px 0; color: #FFD700;">🔍 Search & Filter</h4>
+        <div style="margin-bottom: 10px;">
+            <input type="text" id="searchInput" placeholder="Search by name, numeric ID (0,1,2...), community ID, or description..." 
+                   style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; font-size: 12px;">
+        </div>
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; margin-bottom: 5px; font-size: 12px;">Filter by Type:</label>
+            <select id="typeFilter" style="width: 100%; padding: 5px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; font-size: 12px;">
+                <option value="">All Types</option>
+                <option value="GEO">GEO</option>
+                <option value="PERSON">PERSON</option>
+                <option value="ORGANIZATION">ORGANIZATION</option>
+                <option value="EVENT">EVENT</option>
+            </select>
+        </div>
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; margin-bottom: 5px; font-size: 12px;">Min Connections:</label>
+            <input type="range" id="degreeFilter" min="0" max="100" value="0" 
+                   style="width: 100%;">
+            <span id="degreeValue" style="font-size: 11px; color: #ccc;">0+</span>
+        </div>
+        <div style="margin-bottom: 10px;">
+            <button id="clearFilters" style="padding: 6px 12px; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Clear Filters</button>
+            <button id="fitToFiltered" style="padding: 6px 12px; background: #8A2BE2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: 5px;">Fit View</button>
+        </div>
+    </div>
+    
+    <!-- Results -->
+    <div style="margin-bottom: 15px; border-top: 1px solid #555; padding-top: 10px;">
+        <h4 style="margin: 0 0 8px 0; color: #FFD700;">📋 Search Results</h4>
+        <div id="searchResults" style="max-height: 200px; overflow-y: auto; font-size: 11px; background: #222; border-radius: 4px; padding: 5px;">
+            <div style="color: #888; font-style: italic;">No search performed</div>
+        </div>
+    </div>
+    
+    <!-- Other Controls -->
+    <div style="margin-bottom: 15px; border-top: 1px solid #555; padding-top: 10px;">
+        <label style="display: block; margin-bottom: 5px; font-size: 12px;">Node Size by:</label>
+        <select id="nodeSizeBy" style="width: 100%; padding: 5px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; font-size: 12px;">
+            <option value="degree">Degree (Connections)</option>
+            <option value="uniform">Uniform Size</option>
+        </select>
+    </div>
+    
+    <!-- Legend -->
+    <div id="legend" style="border-top: 1px solid #555; padding-top: 10px; font-size: 12px;">
+        <h4 style="margin: 0 0 8px 0;">Legend:</h4>
+        <div id="legendContent"></div>
+    </div>
+    
+    <!-- Stats -->
+    <div id="stats" style="border-top: 1px solid #555; padding-top: 10px; font-size: 11px; color: #ccc;">
+        <div>Showing: <span id="visibleNodes">0</span> / <span id="totalNodes">0</span> nodes</div>
+        <div>Selected: <span id="selectedNodes">0</span> nodes</div>
+    </div>
+</div>
+
+<div id="graph"></div>
+
+<script type="module">
+    // Remove the Three.js import as it's already included in the 3d-force-graph library
+
+    const graphElement = document.getElementById('graph');
+
+    fetch('europe_knowledge_graph.json')
+        .then(res => res.json())
+        .then(data => {
+            // Enhanced semantic color palette with VERY distinct, vibrant colors
+            const semanticColors = {
+                'GEO': {
+                    base: '#00FF00',      // Bright Green for geographical locations
+                    variants: ['#32CD32', '#00FF32', '#00FF64', '#00FF96', '#00FFC8']
+                },
+                'PERSON': {
+                    base: '#0080FF',      // Bright Blue for people
+                    variants: ['#0066FF', '#0099FF', '#00CCFF', '#33DDFF', '#66EEFF']
+                },
+                'ORGANIZATION': {
+                    base: '#FF4000',      // Bright Orange for organizations
+                    variants: ['#FF6600', '#FF8000', '#FF9900', '#FFB300', '#FFCC00']
+                },
+                'EVENT': {
+                    base: '#FF00FF',      // Bright Magenta for events
+                    variants: ['#FF33FF', '#FF66FF', '#FF99FF', '#FFCCFF', '#E6B3FF']
+                },
+                'default': {
+                    base: '#FFFFFF',      // White for others
+                    variants: ['#CCCCCC', '#DDDDDD', '#EEEEEE', '#F0F0F0', '#F8F8F8']
+                }
+            };
+
+            // Community colors for fallback (when semantic coloring is disabled)
+            const communityColors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+                '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+                '#F39C12', '#E74C3C', '#8E44AD', '#3498DB', '#2ECC71',
+                '#F1C40F', '#E67E22', '#1ABC9C', '#34495E', '#9B59B6'
+            ];
+
+            // Color mode toggle
+            let colorBySemantics = true;
+
+            // Function to get semantic color based on node type
+            function getSemanticColor(nodeType, nodeIndex) {
+                const colorSet = semanticColors[nodeType] || semanticColors.default;
+                // Use base color or pick from variants for variety
+                if (nodeIndex % 4 === 0) {
+                    return colorSet.base;
+                } else {
+                    const variantIndex = (nodeIndex - 1) % colorSet.variants.length;
+                    return colorSet.variants[variantIndex];
+                }
+            }
+
+            // Function to get a color with slight variation for nodes in same community
+            function getCommunityColor(communityId, nodeIndex) {
+                const baseColor = communityColors[communityId % communityColors.length];
+                // Add slight variation to base color for nodes in same community
+                const variation = (nodeIndex % 3) * 0.1 - 0.1; // -0.1, 0, 0.1
+                return adjustColorBrightness(baseColor, variation);
+            }
+
+            // Function to adjust color brightness
+            function adjustColorBrightness(color, factor) {
+                if (!color || typeof color !== 'string') {
+                    return '#607D8B'; // fallback color
+                }
+                const hex = color.replace('#', '');
+                if (hex.length !== 6) {
+                    return color; // return original if not valid hex
+                }
+                const r = parseInt(hex.substr(0, 2), 16);
+                const g = parseInt(hex.substr(2, 2), 16);
+                const b = parseInt(hex.substr(4, 2), 16);
+                
+                const adjust = (c) => Math.max(0, Math.min(255, Math.round(c * (1 + factor))));
+                
+                return '#' + [adjust(r), adjust(g), adjust(b)]
+                    .map(c => c.toString(16).padStart(2, '0')).join('');
+            }
+
+            const gData = {
+                nodes: data.nodes.map((node, index) => ({
+                    id: node.id,
+                    humanId: index, // Add human-readable numeric ID
+                    name: node.label,
+                    description: node.description,
+                    val: node.degree > 0 ? node.degree : 1, // val can't be 0
+                    group: node.community,
+                    type: node.type || 'default',
+                    color: colorBySemantics ? 
+                           getSemanticColor(node.type || 'default', index) :
+                           (node.community >= 0 ? getCommunityColor(node.community, index) : 
+                            getSemanticColor(node.type || 'default', index))
+                })),
+                links: data.edges.map(edge => {
+                    // Color links based on semantic relationships with bright colors
+                    const sourceNode = data.nodes.find(n => n.id === edge.source);
+                    const targetNode = data.nodes.find(n => n.id === edge.target);
+                    
+                    let linkColor = '#AAAAAA'; // default bright gray
+                    if (sourceNode && targetNode) {
+                        if (colorBySemantics) {
+                            // Color based on semantic types
+                            if (sourceNode.type === targetNode.type) {
+                                // Same type - use bright semantic color
+                                const semanticColor = semanticColors[sourceNode.type] || semanticColors.default;
+                                linkColor = adjustColorBrightness(semanticColor.base, -0.3);
+                            } else {
+                                // Different types - use subtle gray
+                                linkColor = '#888888';
+                            }
+                        } else {
+                            // Community-based coloring
+                            if (sourceNode.community === targetNode.community && sourceNode.community >= 0) {
+                                linkColor = adjustColorBrightness(communityColors[sourceNode.community % communityColors.length], 0.2);
+                            } else {
+                                linkColor = '#AAAAAA';
+                            }
+                        }
+                    }
+                    
+                    return {
+                        source: edge.source,
+                        target: edge.target,
+                        name: edge.relation,
+                        value: edge.weight,
+                        color: linkColor,
+                        semanticRelation: sourceNode && targetNode ? 
+                            `${sourceNode.type || 'UNKNOWN'} → ${targetNode.type || 'UNKNOWN'}` : 'UNKNOWN'
+                    };
+                })
+            };
+
+            // Cross-link node objects for efficient neighbor lookup
+            gData.links.forEach(link => {
+                const a = gData.nodes.find(n => n.id === link.source);
+                const b = gData.nodes.find(n => n.id === link.target);
+                
+                if (a && b) {
+                    !a.neighbors && (a.neighbors = []);
+                    !b.neighbors && (b.neighbors = []);
+                    a.neighbors.push(b);
+                    b.neighbors.push(a);
+
+                    !a.links && (a.links = []);
+                    !b.links && (b.links = []);
+                    a.links.push(link);
+                    b.links.push(link);
+                }
+            });
+
+            // First, let's get the basic graph working
+            const Graph = ForceGraph3D()(graphElement)
+                .graphData(gData)
+                .backgroundColor('#1a1a1a')
+                .showNavInfo(true)
+                .nodeId('id')
+                .nodeVal('val')
+                .nodeLabel(node => `
+                    <div class="node-label">
+                        <b>${node.name}</b><br>
+                        <small style="color: #FFD700;">Type: ${node.type || 'Unknown'}</small><br>
+                        <small>Community: ${node.group >= 0 ? node.group : 'None'}</small><br>
+                        <small>Connections: ${node.val}</small><br>
+                        ${node.description ? `<div style="margin-top: 5px; max-width: 300px; word-wrap: break-word;">${node.description.substring(0, 200)}${node.description.length > 200 ? '...' : ''}</div>` : ''}
+                    </div>
+                `)
+                .nodeColor('color')
+                .nodeOpacity(0.8)
+                .linkSource('source')
+                .linkTarget('target')
+                .linkLabel('name')
+                .linkDirectionalArrowLength(3.5)
+                .linkDirectionalArrowRelPos(1)
+                .linkWidth(1.5)
+                .linkOpacity(0.8)
+                .linkColor('color');
+
+            // Track highlighted state
+            const highlightNodes = new Set();
+            const highlightLinks = new Set();
+            let hoverNode = null;
+
+            // Add click functionality
+            Graph.onNodeClick(node => {
+                if ((!node && !highlightNodes.size) || (node && hoverNode === node)) {
+                    // Clear highlights
+                    highlightNodes.clear();
+                    highlightLinks.clear();
+                    hoverNode = null;
+                } else if (node) {
+                    highlightNodes.clear();
+                    highlightLinks.clear();
+                    
+                    highlightNodes.add(node);
+                    if (node.neighbors) {
+                        node.neighbors.forEach(neighbor => highlightNodes.add(neighbor));
+                    }
+                    if (node.links) {
+                        node.links.forEach(link => highlightLinks.add(link));
+                    }
+                    
+                    hoverNode = node;
+                }
+
+                // Update colors
+                Graph.nodeColor(n => {
+                    if (hoverNode === n) return n.color; // Keep original color for hovered node
+                    if (highlightNodes.has(n)) return n.color;
+                    if (hoverNode) return '#444444';
+                    return n.color;
+                });
+                
+                Graph.linkColor(l => {
+                    if (highlightLinks.has(l)) return l.color; // Keep original color
+                    if (hoverNode) return '#333333';
+                    return l.color;
+                });
+            })
+            .onBackgroundClick(() => {
+                highlightNodes.clear();
+                highlightLinks.clear();
+                hoverNode = null;
+                Graph.nodeColor('color').linkColor('color');
+            });
+
+            // Function to create text sprite for a node
+            function createTextSprite(node) {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                const fontSize = 16;
+                context.font = `bold ${fontSize}px Arial`;
+                context.fillStyle = 'white';
+                context.strokeStyle = 'black';
+                context.lineWidth = 2;
+                
+                // Measure text and set canvas size
+                const textWidth = context.measureText(node.name).width;
+                canvas.width = textWidth + 16;
+                canvas.height = fontSize + 8;
+                
+                // Redraw with proper canvas size
+                context.font = `bold ${fontSize}px Arial`;
+                context.fillStyle = 'white';
+                context.strokeStyle = 'black';
+                context.lineWidth = 2;
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                
+                // Draw text with stroke (outline)
+                context.strokeText(node.name, canvas.width/2, canvas.height/2);
+                context.fillText(node.name, canvas.width/2, canvas.height/2);
+                
+                // Create texture and sprite
+                const texture = new THREE.CanvasTexture(canvas);
+                const spriteMaterial = new THREE.SpriteMaterial({ 
+                    map: texture,
+                    transparent: true,
+                    alphaTest: 0.1
+                });
+                const sprite = new THREE.Sprite(spriteMaterial);
+                
+                // Scale sprite appropriately
+                const scale = Math.max(3, Math.cbrt(node.val) * 2);
+                sprite.scale.set(scale, scale * 0.5, 1);
+                
+                return sprite;
+            }
+
+            // Add text sprites immediately after a short delay
+            setTimeout(() => {
+                gData.nodes.forEach(node => {
+                    const sprite = createTextSprite(node);
+                    Graph.scene().add(sprite);
+                    node._textSprite = sprite;
+                });
+            }, 1000);
+
+            // Update text positions during animation
+            Graph.onEngineTick(() => {
+                gData.nodes.forEach(node => {
+                    if (node._textSprite && node.x !== undefined) {
+                        const offset = Math.cbrt(node.val) * 6;
+                        node._textSprite.position.set(node.x, node.y + offset, node.z);
+                    }
+                });
+            });
+
+            // Adjust forces for better layout
+            Graph.d3Force('charge').strength(-300);
+            Graph.d3Force('link').distance(50);
+
+            // Function to update legend
+            function updateLegend() {
+                const legendContent = document.getElementById('legendContent');
+                if (colorBySemantics) {
+                    legendContent.innerHTML = `
+                        <div style="margin-bottom: 5px;"><span style="display: inline-block; width: 12px; height: 12px; background: ${semanticColors.GEO.base}; margin-right: 5px; border-radius: 2px;"></span>GEO (${typeStats.GEO || 0})</div>
+                        <div style="margin-bottom: 5px;"><span style="display: inline-block; width: 12px; height: 12px; background: ${semanticColors.PERSON.base}; margin-right: 5px; border-radius: 2px;"></span>PERSON (${typeStats.PERSON || 0})</div>
+                        <div style="margin-bottom: 5px;"><span style="display: inline-block; width: 12px; height: 12px; background: ${semanticColors.ORGANIZATION.base}; margin-right: 5px; border-radius: 2px;"></span>ORG (${typeStats.ORGANIZATION || 0})</div>
+                        <div style="margin-bottom: 5px;"><span style="display: inline-block; width: 12px; height: 12px; background: ${semanticColors.EVENT.base}; margin-right: 5px; border-radius: 2px;"></span>EVENT (${typeStats.EVENT || 0})</div>
+                        <div><span style="display: inline-block; width: 12px; height: 12px; background: ${semanticColors.default.base}; margin-right: 5px; border-radius: 2px;"></span>OTHER (${typeStats.default || 0})</div>
+                    `;
+                } else {
+                    legendContent.innerHTML = '<div>Colors represent different communities detected in the network</div>';
+                }
+            }
+
+            // Function to refresh graph colors
+            function refreshGraphColors() {
+                // Update node colors
+                gData.nodes.forEach((node, index) => {
+                    const originalIndex = data.nodes.findIndex(n => n.id === node.id);
+                    node.color = colorBySemantics ? 
+                        getSemanticColor(node.type || 'default', originalIndex) :
+                        (node.group >= 0 ? getCommunityColor(node.group, originalIndex) : 
+                         '#888888');
+                });
+
+                // Update link colors with brighter, more visible colors
+                gData.links.forEach(link => {
+                    const sourceNode = gData.nodes.find(n => n.id === (link.source.id || link.source));
+                    const targetNode = gData.nodes.find(n => n.id === (link.target.id || link.target));
+                    
+                    if (sourceNode && targetNode) {
+                        if (colorBySemantics) {
+                            if (sourceNode.type === targetNode.type) {
+                                // Same semantic type - use bright version of that type's color
+                                const semanticColor = semanticColors[sourceNode.type] || semanticColors.default;
+                                link.color = adjustColorBrightness(semanticColor.base, -0.3); // Moderate darkening
+                            } else {
+                                // Different types - use subtle gray
+                                link.color = '#888888';
+                            }
+                        } else {
+                            if (sourceNode.group === targetNode.group && sourceNode.group >= 0) {
+                                // Same community - use bright version of community color
+                                link.color = adjustColorBrightness(communityColors[sourceNode.group % communityColors.length], 0.2); // Brighten instead
+                            } else {
+                                // Different communities - use neutral gray
+                                link.color = '#AAAAAA'; // Light gray for cross-community
+                            }
+                        }
+                    }
+                });
+
+                // Force refresh the graph
+                Graph.graphData(gData);
+                updateLegend();
+            }
+
+            // Control event listeners
+            document.getElementById('toggleSemantics').addEventListener('click', () => {
+                console.log('Switching to semantic colors');
+                colorBySemantics = true;
+                document.getElementById('toggleSemantics').style.background = '#4CAF50';
+                document.getElementById('toggleCommunity').style.background = '#555';
+                refreshGraphColors();
+            });
+
+            document.getElementById('toggleCommunity').addEventListener('click', () => {
+                console.log('Switching to community colors');
+                colorBySemantics = false;
+                document.getElementById('toggleSemantics').style.background = '#555';
+                document.getElementById('toggleCommunity').style.background = '#2196F3';
+                refreshGraphColors();
+            });
+
+            document.getElementById('nodeSizeBy').addEventListener('change', (e) => {
+                if (e.target.value === 'uniform') {
+                    Graph.nodeVal(1);
+                } else {
+                    Graph.nodeVal('val');
+                }
+            });
+
+            // Add semantic type statistics
+            const typeStats = {};
+            data.nodes.forEach(node => {
+                const type = node.type || 'default';
+                typeStats[type] = (typeStats[type] || 0) + 1;
+            });
+            console.log('Semantic type distribution:', typeStats);
+
+            // Search and filtering functionality
+            let filteredNodes = new Set();
+            let selectedNodes = new Set();
+            let originalGraphData = { nodes: [...gData.nodes], links: [...gData.links] };
+
+            // Update stats display
+            function updateStats() {
+                document.getElementById('totalNodes').textContent = originalGraphData.nodes.length;
+                document.getElementById('visibleNodes').textContent = gData.nodes.length;
+                document.getElementById('selectedNodes').textContent = selectedNodes.size;
+            }
+
+            // Search function with entity ID and report ID support
+            function performSearch(query) {
+                const results = [];
+                const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 0);
+                
+                if (searchTerms.length === 0) {
+                    return results;
+                }
+
+                originalGraphData.nodes.forEach(node => {
+                    let isMatch = false;
+                    let score = 0;
+
+                    // Check for exact human-readable ID match (highest priority)
+                    if (node.humanId !== undefined && node.humanId.toString() === query) {
+                        isMatch = true;
+                        score += 150;
+                    }
+
+                    // Check for partial human-readable ID match
+                    if (node.humanId !== undefined && node.humanId.toString().includes(query)) {
+                        isMatch = true;
+                        score += 100;
+                    }
+
+                    // Check for exact UUID entity ID match
+                    if (node.id && node.id.toLowerCase() === query.toLowerCase()) {
+                        isMatch = true;
+                        score += 90;
+                    }
+
+                    // Check for partial UUID entity ID match
+                    if (node.id && node.id.toLowerCase().includes(query.toLowerCase())) {
+                        isMatch = true;
+                        score += 40;
+                    }
+
+                    // Check for community/report ID match (if node has community info)
+                    if (node.group !== undefined && node.group >= 0) {
+                        const communityIdStr = node.group.toString();
+                        if (communityIdStr === query) {
+                            isMatch = true;
+                            score += 75;
+                        }
+                        if (communityIdStr.includes(query)) {
+                            isMatch = true;
+                            score += 25;
+                        }
+                    }
+
+                    // Standard text search
+                    const searchText = [
+                        node.name,
+                        node.type,
+                        node.description || ''
+                    ].join(' ').toLowerCase();
+
+                    const textMatches = searchTerms.every(term => 
+                        searchText.includes(term) || 
+                        (node.id && node.id.toLowerCase().includes(term))
+                    );
+
+                    if (textMatches) {
+                        isMatch = true;
+                        searchTerms.forEach(term => {
+                            if (node.name.toLowerCase().includes(term)) score += 10;
+                            if (node.type.toLowerCase().includes(term)) score += 5;
+                            if (node.description && node.description.toLowerCase().includes(term)) score += 1;
+                            if (node.id && node.id.toLowerCase().includes(term)) score += 15;
+                        });
+                    }
+
+                    if (isMatch) {
+                        results.push({ node: node, score: score });
+                    }
+                });
+
+                return results.sort((a, b) => b.score - a.score);
+            }
+
+            // Display search results
+            function displaySearchResults(results) {
+                const resultsContainer = document.getElementById('searchResults');
+                
+                if (results.length === 0) {
+                    resultsContainer.innerHTML = '<div style="color: #888; font-style: italic;">No results found</div>';
+                    return;
+                }
+
+                const html = results.slice(0, 20).map(result => {
+                    const node = result.node;
+                    const truncatedDesc = node.description ? 
+                        (node.description.length > 60 ? node.description.substring(0, 60) + '...' : node.description) : 
+                        'No description';
+                    
+                    const shortUuid = node.id.length > 15 ? node.id.substring(0, 15) + '...' : node.id;
+                    const communityInfo = node.group >= 0 ? ` • Community: ${node.group}` : '';
+                    
+                    return `
+                        <div class="search-result" data-node-id="${node.id}" 
+                             style="padding: 8px; margin: 4px 0; background: #333; border-radius: 4px; cursor: pointer; border-left: 3px solid ${node.color};">
+                            <div style="font-weight: bold; color: ${node.color};">${node.name}</div>
+                            <div style="font-size: 9px; color: #FFD700; font-family: monospace; font-weight: bold;">ID: ${node.humanId}</div>
+                            <div style="font-size: 8px; color: #888; font-family: monospace;">UUID: ${shortUuid}</div>
+                            <div style="font-size: 10px; color: #aaa;">${node.type} • ${node.val} connections${communityInfo}</div>
+                            <div style="font-size: 10px; color: #ccc; margin-top: 2px;">${truncatedDesc}</div>
+                        </div>
+                    `;
+                }).join('');
+
+                resultsContainer.innerHTML = html;
+
+                // Add click handlers to search results
+                document.querySelectorAll('.search-result').forEach(element => {
+                    element.addEventListener('click', () => {
+                        const nodeId = element.getAttribute('data-node-id');
+                        selectAndHighlightNode(nodeId);
+                    });
+                });
+            }
+
+            // Select and highlight a node
+            function selectAndHighlightNode(nodeId) {
+                const node = gData.nodes.find(n => n.id === nodeId);
+                if (!node) return;
+
+                // Clear existing selection
+                selectedNodes.clear();
+                highlightNodes.clear();
+                highlightLinks.clear();
+
+                // Add to selection
+                selectedNodes.add(node);
+                highlightNodes.add(node);
+
+                // Add neighbors
+                if (node.neighbors) {
+                    node.neighbors.forEach(neighbor => highlightNodes.add(neighbor));
+                }
+                if (node.links) {
+                    node.links.forEach(link => highlightLinks.add(link));
+                }
+
+                // Update graph colors
+                Graph.nodeColor(n => {
+                    if (selectedNodes.has(n)) return n.color; // Keep original color for selected
+                    if (highlightNodes.has(n)) return n.color;
+                    return '#444444'; // Dim others
+                });
+                
+                Graph.linkColor(l => {
+                    if (highlightLinks.has(l)) return l.color; // Keep original color
+                    return '#333333';
+                });
+
+                // Focus camera on node area (not too close)
+                Graph.cameraPosition(
+                    { x: node.x + 200, y: node.y + 200, z: node.z + 200 },
+                    { x: node.x, y: node.y, z: node.z },
+                    1000
+                );
+
+                updateStats();
+            }
+
+            // Apply filters
+            function applyFilters() {
+                const typeFilter = document.getElementById('typeFilter').value;
+                const degreeFilter = parseInt(document.getElementById('degreeFilter').value);
+
+                let filteredNodes = originalGraphData.nodes.filter(node => {
+                    if (typeFilter && node.type !== typeFilter) return false;
+                    if (node.val < degreeFilter) return false;
+                    return true;
+                });
+
+                let filteredLinks = originalGraphData.links.filter(link => {
+                    const sourceExists = filteredNodes.some(n => n.id === (link.source.id || link.source));
+                    const targetExists = filteredNodes.some(n => n.id === (link.target.id || link.target));
+                    return sourceExists && targetExists;
+                });
+
+                gData.nodes = filteredNodes;
+                gData.links = filteredLinks;
+
+                Graph.graphData(gData);
+                updateStats();
+            }
+
+            // Clear all filters
+            function clearFilters() {
+                document.getElementById('searchInput').value = '';
+                document.getElementById('typeFilter').value = '';
+                document.getElementById('degreeFilter').value = '0';
+                document.getElementById('degreeValue').textContent = '0+';
+                
+                selectedNodes.clear();
+                highlightNodes.clear();
+                highlightLinks.clear();
+
+                gData.nodes = [...originalGraphData.nodes];
+                gData.links = [...originalGraphData.links];
+
+                Graph.graphData(gData);
+                Graph.nodeColor('color').linkColor('color');
+                
+                document.getElementById('searchResults').innerHTML = '<div style="color: #888; font-style: italic;">No search performed</div>';
+                updateStats();
+            }
+
+            // Event listeners for search and filters
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                const query = e.target.value.trim();
+                if (query.length >= 2) {
+                    const results = performSearch(query);
+                    displaySearchResults(results);
+                } else {
+                    document.getElementById('searchResults').innerHTML = '<div style="color: #888; font-style: italic;">Type at least 2 characters</div>';
+                }
+            });
+
+            document.getElementById('typeFilter').addEventListener('change', applyFilters);
+
+            document.getElementById('degreeFilter').addEventListener('input', (e) => {
+                const value = e.target.value;
+                document.getElementById('degreeValue').textContent = value + '+';
+                applyFilters();
+            });
+
+            document.getElementById('clearFilters').addEventListener('click', clearFilters);
+
+            document.getElementById('fitToFiltered').addEventListener('click', () => {
+                Graph.zoomToFit(1000);
+            });
+
+            // Initialize legend and stats
+            updateLegend();
+            updateStats();
+
+        })
+        .catch(error => console.error('Error fetching or processing graph data:', error));
+</script>
+</body>
+</html> 
